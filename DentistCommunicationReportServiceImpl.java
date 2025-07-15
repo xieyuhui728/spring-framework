@@ -26,7 +26,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     private EntityManager entityManager;
 
     /**
-     * 主查询SQL - 完全兼容参数不传场景，支持所有参数为null的情况
+     * 主查询SQL - 修复GROUP BY子句以包含所有非聚合字段
      */
     private static final String MAIN_QUERY_TEMPLATE = """
             WITH ExpandedOrders AS (
@@ -165,12 +165,13 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                 LEFT JOIN gms_case gc ON gc.dentist_code = gd.code
                 LEFT JOIN gms_order_case_related_detail gocrd ON gc.code = gocrd.case_code
                 where gc.dentist_code IS NOT NULL
-                GROUP BY gd.id, gd.name, gocrd.case_code
+                GROUP BY gd.id, gd.name, gd.code, gocrd.case_code
             ),
             FirstDesigns AS (
                 SELECT
                     dc.dentist_id,
                     dc.dentist_name,
+                    dc.dentist_code,
                     dc.case_code,
                     dc.case_tags,
                     fd.design_type
@@ -181,6 +182,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
               SELECT
                 fd.dentist_id,
                 fd.dentist_name,
+                fd.dentist_code,
                 COUNT(DISTINCT CASE WHEN fd.design_type = 'pre' THEN fd.case_code END) AS pre_design_tag_cases,
                 COUNT(DISTINCT CASE WHEN fd.design_type = 'pre' AND pcm.has_call = 1 THEN fd.case_code END) AS pre_called_cases,
                 COUNT(DISTINCT CASE WHEN fd.design_type = 'pre' AND pcm.connected_calls > 0 THEN fd.case_code END) AS pre_connected_cases,
@@ -198,7 +200,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             LEFT JOIN post_call_metrics ppcm 
                 ON fd.case_code = ppcm.case_code 
                 AND fd.design_type = 'post'
-            GROUP BY fd.dentist_id, fd.dentist_name
+            GROUP BY fd.dentist_id, fd.dentist_name, fd.dentist_code
             ),
             dentist_case_metrics AS (
               SELECT 
@@ -211,59 +213,59 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
               GROUP BY gd.id
             )
             select
-              COALESCE(gms_team.name, '未分组') AS team_name,
-              gms_dentist.name AS dentist_name,
-              gms_dentist.code AS dentist_code,
-              COALESCE(dcm.all_case, 0) AS all_cases_num,
-              COALESCE(dcm.first_tag_cases, 0) AS first_tag_cases_num,
-              COALESCE(dom.pre_design_tag_cases, 0) AS pre_design_tag_cases_num,
-              COALESCE(dom.pre_called_cases, 0) AS pre_called_cases_num,
-              CASE WHEN COALESCE(dom.pre_design_tag_cases, 0) > 0 
-                   THEN ROUND(COALESCE(dom.pre_called_cases, 0) * 100.0 / dom.pre_design_tag_cases, 2)
+              COALESCE(MAX(gms_team.name), '未分组') AS team_name,
+              MAX(gms_dentist.name) AS dentist_name,
+              MAX(gms_dentist.code) AS dentist_code,
+              COALESCE(MAX(dcm.all_case), 0) AS all_cases_num,
+              COALESCE(MAX(dcm.first_tag_cases), 0) AS first_tag_cases_num,
+              COALESCE(MAX(dom.pre_design_tag_cases), 0) AS pre_design_tag_cases_num,
+              COALESCE(MAX(dom.pre_called_cases), 0) AS pre_called_cases_num,
+              CASE WHEN COALESCE(MAX(dom.pre_design_tag_cases), 0) > 0 
+                   THEN ROUND(COALESCE(MAX(dom.pre_called_cases), 0) * 100.0 / MAX(dom.pre_design_tag_cases), 2)
                    ELSE 0 END AS pre_called_cases_rate,
-              COALESCE(dom.pre_connected_cases, 0) AS pre_connected_cases_num,
-              CASE WHEN COALESCE(dom.pre_design_tag_cases, 0) > 0 
-                   THEN ROUND(COALESCE(dom.pre_connected_cases, 0) * 100.0 / dom.pre_design_tag_cases, 2)
+              COALESCE(MAX(dom.pre_connected_cases), 0) AS pre_connected_cases_num,
+              CASE WHEN COALESCE(MAX(dom.pre_design_tag_cases), 0) > 0 
+                   THEN ROUND(COALESCE(MAX(dom.pre_connected_cases), 0) * 100.0 / MAX(dom.pre_design_tag_cases), 2)
                    ELSE 0 END AS pre_connected_cases_rate,
-              COALESCE(dom.pre_total_connected_calls, 0) AS pre_total_connected_call_num,
-              CASE WHEN COALESCE(dom.pre_connected_cases, 0) > 0 
-                   THEN ROUND(COALESCE(dom.pre_total_connected_calls, 0) * 1.0 / dom.pre_connected_cases, 2)
+              COALESCE(MAX(dom.pre_total_connected_calls), 0) AS pre_total_connected_call_num,
+              CASE WHEN COALESCE(MAX(dom.pre_connected_cases), 0) > 0 
+                   THEN ROUND(COALESCE(MAX(dom.pre_total_connected_calls), 0) * 1.0 / MAX(dom.pre_connected_cases), 2)
                    ELSE 0 END AS pre_average_connected_call_num,
               CONCAT(
-                LPAD(FLOOR(COALESCE(dom.pre_total_duration_sec, 0) / 3600), 2, '0'), ':',
-                LPAD(FLOOR((COALESCE(dom.pre_total_duration_sec, 0) % 3600) / 60), 2, '0'), ':',
-                LPAD(COALESCE(dom.pre_total_duration_sec, 0) % 60, 2, '0')
+                LPAD(FLOOR(COALESCE(MAX(dom.pre_total_duration_sec), 0) / 3600), 2, '0'), ':',
+                LPAD(FLOOR((COALESCE(MAX(dom.pre_total_duration_sec), 0) % 3600) / 60), 2, '0'), ':',
+                LPAD(COALESCE(MAX(dom.pre_total_duration_sec), 0) % 60, 2, '0')
               ) AS pre_total_duration_sec,
-              CASE WHEN COALESCE(dom.pre_connected_cases, 0) > 0 
+              CASE WHEN COALESCE(MAX(dom.pre_connected_cases), 0) > 0 
                    THEN CONCAT(
-                          LPAD(FLOOR(COALESCE(dom.pre_total_duration_sec, 0) / dom.pre_connected_cases / 3600), 2, '0'), ':',
-                          LPAD(FLOOR((COALESCE(dom.pre_total_duration_sec, 0) / dom.pre_connected_cases % 3600) / 60), 2, '0'), ':',
-                          LPAD(FLOOR(COALESCE(dom.pre_total_duration_sec, 0) / dom.pre_connected_cases % 60), 2, '0')
+                          LPAD(FLOOR(COALESCE(MAX(dom.pre_total_duration_sec), 0) / MAX(dom.pre_connected_cases) / 3600), 2, '0'), ':',
+                          LPAD(FLOOR((COALESCE(MAX(dom.pre_total_duration_sec), 0) / MAX(dom.pre_connected_cases) % 3600) / 60), 2, '0'), ':',
+                          LPAD(FLOOR(COALESCE(MAX(dom.pre_total_duration_sec), 0) / MAX(dom.pre_connected_cases) % 60), 2, '0')
                         )
                    ELSE '00:00:00' END AS pre_average_duration_sec,
-              COALESCE(dom.post_design_tag_cases, 0) AS post_design_tag_cases_num,
-              COALESCE(dom.post_called_cases, 0) AS post_called_cases_num,
-              CASE WHEN COALESCE(dom.post_design_tag_cases, 0) > 0 
-                   THEN ROUND(COALESCE(dom.post_called_cases, 0) * 100.0 / dom.post_design_tag_cases, 2)
+              COALESCE(MAX(dom.post_design_tag_cases), 0) AS post_design_tag_cases_num,
+              COALESCE(MAX(dom.post_called_cases), 0) AS post_called_cases_num,
+              CASE WHEN COALESCE(MAX(dom.post_design_tag_cases), 0) > 0 
+                   THEN ROUND(COALESCE(MAX(dom.post_called_cases), 0) * 100.0 / MAX(dom.post_design_tag_cases), 2)
                    ELSE 0 END AS post_called_cases_rate,
-              COALESCE(dom.post_connected_cases, 0) AS post_connected_cases_num,
-              CASE WHEN COALESCE(dom.post_design_tag_cases, 0) > 0 
-                   THEN ROUND(COALESCE(dom.post_connected_cases, 0) * 100.0 / dom.post_design_tag_cases, 2)
+              COALESCE(MAX(dom.post_connected_cases), 0) AS post_connected_cases_num,
+              CASE WHEN COALESCE(MAX(dom.post_design_tag_cases), 0) > 0 
+                   THEN ROUND(COALESCE(MAX(dom.post_connected_cases), 0) * 100.0 / MAX(dom.post_design_tag_cases), 2)
                    ELSE 0 END AS post_connected_cases_rate,
-              COALESCE(dom.post_total_connected_calls, 0) AS post_total_connected_call_num,
-              CASE WHEN COALESCE(dom.post_connected_cases, 0) > 0 
-                   THEN ROUND(COALESCE(dom.post_total_connected_calls, 0) * 1.0 / dom.post_connected_cases, 2)
+              COALESCE(MAX(dom.post_total_connected_calls), 0) AS post_total_connected_call_num,
+              CASE WHEN COALESCE(MAX(dom.post_connected_cases), 0) > 0 
+                   THEN ROUND(COALESCE(MAX(dom.post_total_connected_calls), 0) * 1.0 / MAX(dom.post_connected_cases), 2)
                    ELSE 0 END AS post_average_connected_call_num,
               CONCAT(
-                LPAD(FLOOR(COALESCE(dom.post_total_duration_sec, 0) / 3600), 2, '0'), ':',
-                LPAD(FLOOR((COALESCE(dom.post_total_duration_sec, 0) % 3600) / 60), 2, '0'), ':',
-                LPAD(COALESCE(dom.post_total_duration_sec, 0) % 60, 2, '0')
+                LPAD(FLOOR(COALESCE(MAX(dom.post_total_duration_sec), 0) / 3600), 2, '0'), ':',
+                LPAD(FLOOR((COALESCE(MAX(dom.post_total_duration_sec), 0) % 3600) / 60), 2, '0'), ':',
+                LPAD(COALESCE(MAX(dom.post_total_duration_sec), 0) % 60, 2, '0')
               ) AS post_total_duration_sec,
-              CASE WHEN COALESCE(dom.post_connected_cases, 0) > 0 
+              CASE WHEN COALESCE(MAX(dom.post_connected_cases), 0) > 0 
                    THEN CONCAT(
-                          LPAD(FLOOR(COALESCE(dom.post_total_duration_sec, 0) / dom.post_connected_cases / 3600), 2, '0'), ':',
-                          LPAD(FLOOR((COALESCE(dom.post_total_duration_sec, 0) / dom.post_connected_cases % 3600) / 60), 2, '0'), ':',
-                          LPAD(FLOOR(COALESCE(dom.post_total_duration_sec, 0) / dom.post_connected_cases % 60), 2, '0')
+                          LPAD(FLOOR(COALESCE(MAX(dom.post_total_duration_sec), 0) / MAX(dom.post_connected_cases) / 3600), 2, '0'), ':',
+                          LPAD(FLOOR((COALESCE(MAX(dom.post_total_duration_sec), 0) / MAX(dom.post_connected_cases) % 3600) / 60), 2, '0'), ':',
+                          LPAD(FLOOR(COALESCE(MAX(dom.post_total_duration_sec), 0) / MAX(dom.post_connected_cases) % 60), 2, '0')
                         )
                    ELSE '00:00:00' END AS post_average_duration_sec
             FROM dentist_in_scope dis
@@ -282,7 +284,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             """;
 
     /**
-     * 计数查询SQL - 完全兼容参数不传场景
+     * 计数查询SQL - 修复GROUP BY子句
      */
     private static final String COUNT_QUERY = """
             WITH ExpandedOrders AS (
