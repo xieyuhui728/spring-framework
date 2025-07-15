@@ -7,8 +7,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
-import java.time.ZonedDateTime;
-
 @EqualsAndHashCode(callSuper = true)
 @Data
 @Builder
@@ -16,11 +14,11 @@ import java.time.ZonedDateTime;
 @NoArgsConstructor
 public class DentistCommunicationReportQueryVM extends BasePageVM {
 
-    @ApiModelProperty(value = "方案发送日期-开始日期")
-    private ZonedDateTime startTime;
+    @ApiModelProperty(value = "方案发送日期-开始日期", example = "2023-01-01 00:00:00")
+    private String startTime;
 
-    @ApiModelProperty(value = "方案发送日期-结束日期")
-    private ZonedDateTime endTime;
+    @ApiModelProperty(value = "方案发送日期-结束日期", example = "2023-12-31 23:59:59")
+    private String endTime;
 
     @ApiModelProperty(value = "设计组名称")
     private String teamName;

@@ -17,7 +17,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.ZonedDateTime;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -32,6 +32,17 @@ public class DentistCommunicationReportServiceImpl_Backup implements ReportServi
     
     @PersistenceContext(unitName = "doris")
     private EntityManager entityManager;
+    
+    /**
+     * 字符串参数规范化处理
+     * 将空字符串、仅包含空白字符的字符串转换为 null，避免 SQL 日期解析错误
+     */
+    private String normalizeStringParameter(String param) {
+        if (param == null || param.trim().isEmpty()) {
+            return null;
+        }
+        return param.trim();
+    }
 
     /**
      * 简化版主查询SQL - 移除复杂的WITH子句
@@ -308,8 +319,12 @@ public class DentistCommunicationReportServiceImpl_Backup implements ReportServi
             throw new IllegalArgumentException("页大小不能为空且必须在1-1000之间");
         }
         
-        if (param.getStartTime() != null && param.getEndTime() != null) {
-            if (param.getStartTime().isAfter(param.getEndTime())) {
+        // 字符串类型的日期参数验证
+        String startTime = normalizeStringParameter(param.getStartTime());
+        String endTime = normalizeStringParameter(param.getEndTime());
+        if (startTime != null && endTime != null) {
+            // 简单的字符串比较验证 (假设格式为 yyyy-MM-dd HH:mm:ss)
+            if (startTime.compareTo(endTime) > 0) {
                 throw new IllegalArgumentException("开始时间不能大于结束时间");
             }
         }

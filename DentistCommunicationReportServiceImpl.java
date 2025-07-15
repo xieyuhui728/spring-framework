@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.persistence.EntityManager;
 import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
-import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -24,6 +23,17 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     
     @PersistenceContext(unitName = "doris")
     private EntityManager entityManager;
+    
+    /**
+     * 字符串参数规范化处理
+     * 将空字符串、仅包含空白字符的字符串转换为 null，避免 SQL 日期解析错误
+     */
+    private String normalizeStringParameter(String param) {
+        if (param == null || param.trim().isEmpty()) {
+            return null;
+        }
+        return param.trim();
+    }
 
     /**
      * 主查询SQL - 修复GROUP BY子句以包含所有非聚合字段
@@ -459,10 +469,10 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
      * 设置主查询的位置参数 - 完全支持null参数，不传则不过滤
      */
     private void setPositionalParameters(Query query, DentistCommunicationReportQueryVM param, int limit, int offset) {
-        ZonedDateTime startTime = param.getStartTime();
-        ZonedDateTime endTime = param.getEndTime();
-        String teamName = param.getTeamName();
-        String dentistId = param.getDentistId();
+        String startTime = normalizeStringParameter(param.getStartTime());
+        String endTime = normalizeStringParameter(param.getEndTime());
+        String teamName = normalizeStringParameter(param.getTeamName());
+        String dentistId = normalizeStringParameter(param.getDentistId());
         
         // 按照SQL中出现的顺序设置参数
         int paramIndex = 1;
@@ -493,10 +503,10 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
      * 设置计数查询的位置参数 - 完全支持null参数，不传则不过滤
      */
     private void setPositionalParametersForCount(Query query, DentistCommunicationReportQueryVM param) {
-        ZonedDateTime startTime = param.getStartTime();
-        ZonedDateTime endTime = param.getEndTime();
-        String teamName = param.getTeamName();
-        String dentistId = param.getDentistId();
+        String startTime = normalizeStringParameter(param.getStartTime());
+        String endTime = normalizeStringParameter(param.getEndTime());
+        String teamName = normalizeStringParameter(param.getTeamName());
+        String dentistId = normalizeStringParameter(param.getDentistId());
         
         // 按照SQL中出现的顺序设置参数
         int paramIndex = 1;

@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.persistence.EntityManager;
 import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
-import java.time.ZonedDateTime;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -220,10 +220,10 @@ public class DentistCommunicationReportServiceImpl_Simple implements ReportServi
         return DentistCommunicationReportQueryVM.builder()
                 .pageNumber(param.getPageNumber())
                 .pageSize(param.getPageSize())
-                .startTime(param.getStartTime())
-                .endTime(param.getEndTime())
-                .teamName(normalizeStringParam(param.getTeamName()))
-                .dentistId(normalizeStringParam(param.getDentistId()))
+                .startTime(normalizeStringParameter(param.getStartTime()))
+                .endTime(normalizeStringParameter(param.getEndTime()))
+                .teamName(normalizeStringParameter(param.getTeamName()))
+                .dentistId(normalizeStringParameter(param.getDentistId()))
                 .build();
     }
 
@@ -307,7 +307,7 @@ public class DentistCommunicationReportServiceImpl_Simple implements ReportServi
     /**
      * 标准化字符串参数
      */
-    private String normalizeStringParam(String param) {
+    private String normalizeStringParameter(String param) {
         if (param == null) {
             return null;
         }
