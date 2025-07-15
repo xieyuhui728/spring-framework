@@ -26,7 +26,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     private EntityManager entityManager;
 
     /**
-     * 主查询SQL - 使用LIMIT OFFSET分页
+     * 主查询SQL - 使用位置参数解决元数据问题
      */
     private static final String MAIN_QUERY_TEMPLATE = """
             WITH ExpandedOrders AS (
@@ -63,8 +63,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                   ON gc.code = gocrd.case_code
                 LEFT JOIN gms_design gd 
                   ON gc.code = gd.case_code
-                WHERE (:startTime IS NULL OR gd.send_out >= :startTime)
-                  AND (:endTime IS NULL OR gd.send_out <= :endTime)
+                WHERE (? IS NULL OR gd.send_out >= ?)
+                  AND (? IS NULL OR gd.send_out <= ?)
                 GROUP BY gc.code, eo.design_type
                 ) as case_first_design
                 left join gms_design gd on case_first_design.first_design_id = gd.id
@@ -273,15 +273,15 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             LEFT JOIN dentist_order_metrics dom ON gms_dentist.id = dom.dentist_id
             LEFT JOIN dentist_case_metrics dcm ON gms_dentist.id = dcm.dentist_id
             where 1 = 1
-              AND (:teamName IS NULL OR gms_team.name = :teamName)
-              AND (:dentistId IS NULL OR gms_dentist.id = :dentistId)
+              AND (? IS NULL OR gms_team.name = ?)
+              AND (? IS NULL OR gms_dentist.id = ?)
             GROUP BY gms_dentist.id
             ORDER BY gms_dentist.id
-            LIMIT :limit OFFSET :offset
+            LIMIT ? OFFSET ?
             """;
 
     /**
-     * 计数查询SQL - 不包含分页
+     * 计数查询SQL - 使用位置参数
      */
     private static final String COUNT_QUERY = """
             WITH ExpandedOrders AS (
@@ -318,8 +318,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                   ON gc.code = gocrd.case_code
                 LEFT JOIN gms_design gd 
                   ON gc.code = gd.case_code
-                WHERE (:startTime IS NULL OR gd.send_out >= :startTime)
-                  AND (:endTime IS NULL OR gd.send_out <= :endTime)
+                WHERE (? IS NULL OR gd.send_out >= ?)
+                  AND (? IS NULL OR gd.send_out <= ?)
                 GROUP BY gc.code, eo.design_type
                 ) as case_first_design
                 left join gms_design gd on case_first_design.first_design_id = gd.id
@@ -365,8 +365,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             LEFT join gms_order on gocsd.order_id = gms_order.id
             LEFT join gms_team on gms_order.team_id = gms_team.id
             where 1 = 1
-              AND (:teamName IS NULL OR gms_team.name = :teamName)
-              AND (:dentistId IS NULL OR gms_dentist.id = :dentistId)
+              AND (? IS NULL OR gms_team.name = ?)
+              AND (? IS NULL OR gms_dentist.id = ?)
             """;
 
     @Override
@@ -405,7 +405,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 执行主查询获取数据列表 - 使用LIMIT OFFSET分页
+     * 执行主查询获取数据列表 - 使用位置参数避免元数据问题
      */
     @SuppressWarnings("unchecked")
     private List<Object[]> executeMainQuery(DentistCommunicationReportQueryVM param) {
@@ -417,12 +417,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
         
         Query query = entityManager.createNativeQuery(MAIN_QUERY_TEMPLATE);
         
-        // 设置查询参数
-        setCommonQueryParameters(query, param);
-        
-        // 设置分页参数
-        query.setParameter("limit", limit);
-        query.setParameter("offset", offset);
+        // 设置位置参数 - 按照SQL中的顺序
+        setPositionalParameters(query, param, limit, offset);
         
         log.debug("分页参数 - LIMIT: {}, OFFSET: {}", limit, offset);
         
@@ -433,13 +429,13 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 执行计数查询获取总记录数
+     * 执行计数查询获取总记录数 - 使用位置参数
      */
     private Long executeCountQuery(DentistCommunicationReportQueryVM param) {
         log.debug("执行计数查询");
         
         Query query = entityManager.createNativeQuery(COUNT_QUERY);
-        setCommonQueryParameters(query, param);
+        setPositionalParametersForCount(query, param);
         
         Object result = query.getSingleResult();
         Long count = result != null ? ((Number) result).longValue() : 0L;
@@ -450,24 +446,62 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 设置公共查询参数 - 支持null值参数
+     * 设置主查询的位置参数
      */
-    private void setCommonQueryParameters(Query query, DentistCommunicationReportQueryVM param) {
-        // 时间范围参数 - 支持null
+    private void setPositionalParameters(Query query, DentistCommunicationReportQueryVM param, int limit, int offset) {
         ZonedDateTime startTime = param.getStartTime();
         ZonedDateTime endTime = param.getEndTime();
-        
-        query.setParameter("startTime", startTime);
-        query.setParameter("endTime", endTime);
-        
-        // 过滤条件参数 - 支持null和空字符串
         String teamName = normalizeStringParam(param.getTeamName());
         String dentistId = normalizeStringParam(param.getDentistId());
-            
-        query.setParameter("teamName", teamName);
-        query.setParameter("dentistId", dentistId);
         
-        log.debug("查询参数设置完成 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}", 
+        // 按照SQL中出现的顺序设置参数
+        int paramIndex = 1;
+        
+        // first_designs 子查询中的参数 (4个)
+        query.setParameter(paramIndex++, startTime);    // 1: startTime check 1
+        query.setParameter(paramIndex++, startTime);    // 2: startTime value
+        query.setParameter(paramIndex++, endTime);      // 3: endTime check
+        query.setParameter(paramIndex++, endTime);      // 4: endTime value
+        
+        // 主查询where子句中的参数 (4个)
+        query.setParameter(paramIndex++, teamName);     // 5: teamName check
+        query.setParameter(paramIndex++, teamName);     // 6: teamName value
+        query.setParameter(paramIndex++, dentistId);    // 7: dentistId check
+        query.setParameter(paramIndex++, dentistId);    // 8: dentistId value
+        
+        // 分页参数 (2个)
+        query.setParameter(paramIndex++, limit);        // 9: LIMIT
+        query.setParameter(paramIndex, offset);         // 10: OFFSET
+        
+        log.debug("主查询参数设置完成 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}, limit: {}, offset: {}", 
+                 startTime, endTime, teamName, dentistId, limit, offset);
+    }
+
+    /**
+     * 设置计数查询的位置参数
+     */
+    private void setPositionalParametersForCount(Query query, DentistCommunicationReportQueryVM param) {
+        ZonedDateTime startTime = param.getStartTime();
+        ZonedDateTime endTime = param.getEndTime();
+        String teamName = normalizeStringParam(param.getTeamName());
+        String dentistId = normalizeStringParam(param.getDentistId());
+        
+        // 按照SQL中出现的顺序设置参数
+        int paramIndex = 1;
+        
+        // first_designs 子查询中的参数 (4个)
+        query.setParameter(paramIndex++, startTime);    // 1: startTime check 1
+        query.setParameter(paramIndex++, startTime);    // 2: startTime value
+        query.setParameter(paramIndex++, endTime);      // 3: endTime check
+        query.setParameter(paramIndex++, endTime);      // 4: endTime value
+        
+        // 主查询where子句中的参数 (4个)
+        query.setParameter(paramIndex++, teamName);     // 5: teamName check
+        query.setParameter(paramIndex++, teamName);     // 6: teamName value
+        query.setParameter(paramIndex++, dentistId);    // 7: dentistId check
+        query.setParameter(paramIndex, dentistId);      // 8: dentistId value
+        
+        log.debug("计数查询参数设置完成 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}", 
                  startTime, endTime, teamName, dentistId);
     }
 
