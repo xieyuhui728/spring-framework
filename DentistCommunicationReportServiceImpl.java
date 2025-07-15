@@ -25,6 +25,9 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     @PersistenceContext(unitName = "doris")
     private EntityManager entityManager;
 
+    /**
+     * 主查询SQL - 完整的医生沟通报表查询
+     */
     private static final String MAIN_QUERY = """
             WITH ExpandedOrders AS (
               SELECT 
@@ -276,6 +279,9 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             ORDER BY gms_dentist.id
             """;
 
+    /**
+     * 计数查询SQL - 用于分页
+     */
     private static final String COUNT_QUERY = """
             WITH ExpandedOrders AS (
               SELECT 
@@ -366,14 +372,11 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     public PageImpl<DentistCommunicationReportVM> dentistCommunicationReport(
             DentistCommunicationReportQueryVM param) {
         
+        log.info("开始执行医生沟通报表查询，参数: {}", param);
+        
         try {
-            log.info("执行医生沟通报表查询，参数: {}", param);
-            
-            // 创建分页对象
-            Pageable pageable = PageRequest.of(
-                param.getPageNumber(), 
-                param.getPageSize()
-            );
+            // 参数验证
+            validateQueryParams(param);
             
             // 执行数据查询
             List<Object[]> resultList = executeMainQuery(param);
@@ -389,6 +392,9 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                 .map(this::mapToViewModel)
                 .collect(Collectors.toList());
             
+            // 创建分页对象
+            Pageable pageable = PageRequest.of(param.getPageNumber(), param.getPageSize());
+            
             return new PageImpl<>(content, pageable, totalElements);
             
         } catch (Exception e) {
@@ -402,99 +408,144 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
      */
     @SuppressWarnings("unchecked")
     private List<Object[]> executeMainQuery(DentistCommunicationReportQueryVM param) {
+        log.debug("执行主查询 - 页码: {}, 页大小: {}", param.getPageNumber(), param.getPageSize());
+        
         Query query = entityManager.createNativeQuery(MAIN_QUERY);
         setQueryParameters(query, param);
         
-        // 设置MySQL分页
+        // 设置MySQL分页参数
         int offset = param.getPageNumber() * param.getPageSize();
         query.setFirstResult(offset);
         query.setMaxResults(param.getPageSize());
         
-        log.debug("执行主查询，偏移量: {}, 每页大小: {}", offset, param.getPageSize());
+        log.debug("分页参数 - 偏移量: {}, 最大结果数: {}", offset, param.getPageSize());
         
-        return query.getResultList();
+        List<Object[]> results = query.getResultList();
+        log.debug("主查询执行完成，返回 {} 条记录", results.size());
+        
+        return results;
     }
 
     /**
      * 执行计数查询获取总记录数
      */
     private Long executeCountQuery(DentistCommunicationReportQueryVM param) {
+        log.debug("执行计数查询");
+        
         Query query = entityManager.createNativeQuery(COUNT_QUERY);
         setQueryParameters(query, param);
         
         Object result = query.getSingleResult();
-        return result != null ? ((Number) result).longValue() : 0L;
+        Long count = result != null ? ((Number) result).longValue() : 0L;
+        
+        log.debug("计数查询执行完成，总记录数: {}", count);
+        
+        return count;
     }
 
     /**
      * 设置查询参数
      */
     private void setQueryParameters(Query query, DentistCommunicationReportQueryVM param) {
-        // 时间参数
+        // 时间范围参数
         ZonedDateTime startTime = param.getStartTime();
         ZonedDateTime endTime = param.getEndTime();
         
         query.setParameter("startTime", startTime);
         query.setParameter("endTime", endTime);
         
-        // 过滤参数
-        String teamName = (param.getTeamName() != null && !param.getTeamName().trim().isEmpty()) 
-            ? param.getTeamName().trim() : null;
-        String dentistId = (param.getDentistId() != null && !param.getDentistId().trim().isEmpty()) 
-            ? param.getDentistId().trim() : null;
+        // 过滤条件参数 - 空值处理
+        String teamName = trimToNull(param.getTeamName());
+        String dentistId = trimToNull(param.getDentistId());
             
         query.setParameter("teamName", teamName);
         query.setParameter("dentistId", dentistId);
         
-        log.debug("查询参数设置 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}", 
+        log.debug("查询参数设置完成 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}", 
                  startTime, endTime, teamName, dentistId);
     }
 
     /**
      * 将Object[]映射到DentistCommunicationReportVM
-     * 注意：需要按照SQL查询结果的字段顺序进行映射
+     * 按照SQL查询结果的字段顺序进行精确映射
      */
     private DentistCommunicationReportVM mapToViewModel(Object[] row) {
         return DentistCommunicationReportVM.builder()
-            // 基础信息
-            .teamName(getString(row[0]))                           // team_name
-            .dentistName(getString(row[1]))                        // dentist_name  
-            .dentistCode(getString(row[2]))                        // dentist_code
-            .allCasesNum(getString(row[3]))                        // all_cases_num
-            .firstTagCasesNum(getString(row[4]))                   // first_tag_cases_num
+            // 基础信息字段 (0-4)
+            .teamName(safeToString(row[0]))                         // team_name
+            .dentistName(safeToString(row[1]))                      // dentist_name  
+            .dentistCode(safeToString(row[2]))                      // dentist_code
+            .allCasesNum(safeToString(row[3]))                      // all_cases_num
+            .firstTagCasesNum(safeToString(row[4]))                 // first_tag_cases_num
             
-            // 设计前沟通指标
-            .preDesignTagCasesNum(getString(row[5]))               // pre_design_tag_cases_num
-            .preCalledCasesNum(getString(row[6]))                  // pre_called_cases_num
-            .preCalledCasesRate(getString(row[7]))                 // pre_called_cases_rate
-            .preConnectedCasesNum(getString(row[8]))               // pre_connected_cases_num
-            .preConnectedCasesRate(getString(row[9]))              // pre_connected_cases_rate
-            .preTotalConnectedCallNum(getString(row[10]))          // pre_total_connected_call_num
-            .preAverageConnectedCallNum(getString(row[11]))        // pre_average_connected_call_num
-            .preTotalDurationSec(getString(row[12]))               // pre_total_duration_sec
-            .preAverageDurationSec(getString(row[13]))             // pre_average_duration_sec
+            // 设计前沟通指标字段 (5-13)
+            .preDesignTagCasesNum(safeToString(row[5]))             // pre_design_tag_cases_num
+            .preCalledCasesNum(safeToString(row[6]))                // pre_called_cases_num
+            .preCalledCasesRate(safeToString(row[7]))               // pre_called_cases_rate
+            .preConnectedCasesNum(safeToString(row[8]))             // pre_connected_cases_num
+            .preConnectedCasesRate(safeToString(row[9]))            // pre_connected_cases_rate
+            .preTotalConnectedCallNum(safeToString(row[10]))        // pre_total_connected_call_num
+            .preAverageConnectedCallNum(safeToString(row[11]))      // pre_average_connected_call_num
+            .preTotalDurationSec(safeToString(row[12]))             // pre_total_duration_sec
+            .preAverageDurationSec(safeToString(row[13]))           // pre_average_duration_sec
             
-            // 设计后讲解指标
-            .postDesignTagCasesNum(getString(row[14]))             // post_design_tag_cases_num
-            .postCalledCasesNum(getString(row[15]))                // post_called_cases_num
-            .postCalledCasesRate(getString(row[16]))               // post_called_cases_rate
-            .postConnectedCasesNum(getString(row[17]))             // post_connected_cases_num
-            .postConnectedCasesRate(getString(row[18]))            // post_connected_cases_rate
-            .postTotalConnectedCallNum(getString(row[19]))         // post_total_connected_call_num
-            .postAverageConnectedCallNum(getString(row[20]))       // post_average_connected_call_num
-            .postTotalDurationSec(getString(row[21]))              // post_total_duration_sec
-            .postAverageDurationSec(getString(row[22]))            // post_average_duration_sec
+            // 设计后讲解指标字段 (14-22)
+            .postDesignTagCasesNum(safeToString(row[14]))           // post_design_tag_cases_num
+            .postCalledCasesNum(safeToString(row[15]))              // post_called_cases_num
+            .postCalledCasesRate(safeToString(row[16]))             // post_called_cases_rate
+            .postConnectedCasesNum(safeToString(row[17]))           // post_connected_cases_num
+            .postConnectedCasesRate(safeToString(row[18]))          // post_connected_cases_rate
+            .postTotalConnectedCallNum(safeToString(row[19]))       // post_total_connected_call_num
+            .postAverageConnectedCallNum(safeToString(row[20]))     // post_average_connected_call_num
+            .postTotalDurationSec(safeToString(row[21]))            // post_total_duration_sec
+            .postAverageDurationSec(safeToString(row[22]))          // post_average_duration_sec
             .build();
     }
 
     /**
-     * 安全地将Object转换为String
+     * 参数验证
      */
-    private String getString(Object obj) {
+    private void validateQueryParams(DentistCommunicationReportQueryVM param) {
+        if (param == null) {
+            throw new IllegalArgumentException("查询参数不能为空");
+        }
+        
+        if (param.getPageNumber() < 0) {
+            throw new IllegalArgumentException("页码不能小于0");
+        }
+        
+        if (param.getPageSize() <= 0 || param.getPageSize() > 1000) {
+            throw new IllegalArgumentException("页大小必须在1-1000之间");
+        }
+        
+        // 时间范围验证
+        if (param.getStartTime() != null && param.getEndTime() != null) {
+            if (param.getStartTime().isAfter(param.getEndTime())) {
+                throw new IllegalArgumentException("开始时间不能大于结束时间");
+            }
+        }
+        
+        log.debug("参数验证通过");
+    }
+
+    /**
+     * 安全地将Object转换为String，处理null值
+     */
+    private String safeToString(Object obj) {
         if (obj == null) {
             return "0";
         }
-        String str = obj.toString();
+        String str = obj.toString().trim();
         return str.isEmpty() ? "0" : str;
+    }
+
+    /**
+     * 字符串trim并转null处理
+     */
+    private String trimToNull(String str) {
+        if (str == null || str.trim().isEmpty()) {
+            return null;
+        }
+        return str.trim();
     }
 }
