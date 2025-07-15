@@ -6,7 +6,6 @@ import com.example.vm.DentistCommunicationReportQueryVM;
 import com.example.vm.DentistCommunicationReportVM;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -33,22 +32,31 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                 param.getPageSize()
             );
             
-            // 执行查询
-            Page<Object[]> resultPage = dentistCommunicationReportRepository.findDentistCommunicationReport(
+            // 执行查询 - 获取数据列表
+            List<Object[]> resultList = dentistCommunicationReportRepository.findDentistCommunicationReport(
                 param.getStartTime(),
                 param.getEndTime(),
                 param.getTeamName(),
                 param.getDentistId(),
-                pageable
+                param.getPageNumber(),
+                param.getPageSize()
+            );
+            
+            // 执行查询 - 获取总记录数
+            Long totalElements = dentistCommunicationReportRepository.countDentistCommunicationReport(
+                param.getStartTime(),
+                param.getEndTime(),
+                param.getTeamName(),
+                param.getDentistId()
             );
             
             // 映射结果到ViewModel
-            List<DentistCommunicationReportVM> content = resultPage.getContent()
+            List<DentistCommunicationReportVM> content = resultList
                 .stream()
                 .map(this::mapToViewModel)
                 .collect(Collectors.toList());
             
-            return new PageImpl<>(content, pageable, resultPage.getTotalElements());
+            return new PageImpl<>(content, pageable, totalElements);
             
         } catch (Exception e) {
             log.error("Error executing dentist communication report query", e);
@@ -68,7 +76,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             .firstTagCasesNum(getString(row[4]))
             .preDesignTagCasesNum(getString(row[5]))
             .preCalledCasesNum(getString(row[6]))
-            .preCalledCasesRate(getString(row[7]))  // 修正：这应该是拨打率，不是post_design_tag_cases_rate
+            .preCalledCasesRate(getString(row[7]))
             .preConnectedCasesNum(getString(row[8]))
             .preConnectedCasesRate(getString(row[9]))
             .preTotalConnectedCallNum(getString(row[10]))

@@ -1,19 +1,22 @@
 package com.example.repository;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import javax.persistence.Query;
 import java.time.ZonedDateTime;
 import java.util.List;
 
 @Repository
-public interface DentistCommunicationReportRepository extends JpaRepository<Object, Long> {
+@Transactional("dorisTransactionManager")
+public class DentistCommunicationReportRepository {
 
-    @Query(value = """
+    @PersistenceContext(unitName = "doris")
+    private EntityManager entityManager;
+
+    private static final String MAIN_QUERY = """
             WITH ExpandedOrders AS (
               SELECT 
                 id AS order_id,
@@ -262,8 +265,9 @@ public interface DentistCommunicationReportRepository extends JpaRepository<Obje
               AND (:dentistId IS NULL OR gms_dentist.id = :dentistId)
             GROUP BY gms_dentist.id
             ORDER BY gms_dentist.id
-            """, 
-            countQuery = """
+            """;
+
+    private static final String COUNT_QUERY = """
             WITH ExpandedOrders AS (
               SELECT 
                 id AS order_id,
@@ -347,12 +351,50 @@ public interface DentistCommunicationReportRepository extends JpaRepository<Obje
             where 1 = 1
               AND (:teamName IS NULL OR gms_team.name = :teamName)
               AND (:dentistId IS NULL OR gms_dentist.id = :dentistId)
-            """,
-            nativeQuery = true)
-    Page<Object[]> findDentistCommunicationReport(
-            @Param("startTime") ZonedDateTime startTime,
-            @Param("endTime") ZonedDateTime endTime,
-            @Param("teamName") String teamName,
-            @Param("dentistId") String dentistId,
-            Pageable pageable);
+            """;
+
+    /**
+     * 查询医生沟通报表数据
+     */
+    @SuppressWarnings("unchecked")
+    public List<Object[]> findDentistCommunicationReport(ZonedDateTime startTime,
+                                                         ZonedDateTime endTime,
+                                                         String teamName,
+                                                         String dentistId,
+                                                         int pageNumber,
+                                                         int pageSize) {
+        Query query = entityManager.createNativeQuery(MAIN_QUERY);
+        setParameters(query, startTime, endTime, teamName, dentistId);
+        
+        // 设置分页
+        query.setFirstResult(pageNumber * pageSize);
+        query.setMaxResults(pageSize);
+        
+        return query.getResultList();
+    }
+
+    /**
+     * 查询总记录数
+     */
+    public Long countDentistCommunicationReport(ZonedDateTime startTime,
+                                               ZonedDateTime endTime,
+                                               String teamName,
+                                               String dentistId) {
+        Query query = entityManager.createNativeQuery(COUNT_QUERY);
+        setParameters(query, startTime, endTime, teamName, dentistId);
+        
+        Object result = query.getSingleResult();
+        return result != null ? ((Number) result).longValue() : 0L;
+    }
+
+    /**
+     * 设置查询参数
+     */
+    private void setParameters(Query query, ZonedDateTime startTime, ZonedDateTime endTime, 
+                              String teamName, String dentistId) {
+        query.setParameter("startTime", startTime);
+        query.setParameter("endTime", endTime);
+        query.setParameter("teamName", teamName);
+        query.setParameter("dentistId", dentistId);
+    }
 }

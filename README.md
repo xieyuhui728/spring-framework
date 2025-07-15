@@ -33,10 +33,11 @@ src/
 
 ## 功能特性
 
-- ✅ 支持复杂SQL查询转换为Spring JPA实现
-- ✅ 支持分页查询 (PageRequest/Pageable)
+- ✅ 支持复杂SQL查询转换为EntityManager实现
+- ✅ 支持分页查询 (手动分页实现)
 - ✅ 支持参数化查询 (时间范围、设计组、医生ID)
-- ✅ 原生SQL查询 (@Query with nativeQuery = true)
+- ✅ 原生SQL查询 (EntityManager.createNativeQuery)
+- ✅ 多数据源支持 (主数据源 + Doris数据源)
 - ✅ 自动结果映射到ViewModel
 - ✅ 完整的错误处理和日志记录
 - ✅ RESTful API设计
@@ -97,9 +98,15 @@ src/
 ### 2. 配置数据库
 修改 `src/main/resources/application.properties`:
 ```properties
-spring.datasource.url=jdbc:mysql://localhost:3306/your_database_name
-spring.datasource.username=your_username
-spring.datasource.password=your_password
+# 主数据源配置
+spring.datasource.url=jdbc:mysql://localhost:3306/primary_database
+spring.datasource.username=primary_username
+spring.datasource.password=primary_password
+
+# Doris数据源配置 (用于报表查询)
+spring.datasource.doris.url=jdbc:mysql://doris-host:9030/doris_database
+spring.datasource.doris.username=doris_username
+spring.datasource.doris.password=doris_password
 ```
 
 ### 3. 运行应用
@@ -124,12 +131,31 @@ curl -X POST http://localhost:8080/api/report/dentistCommunicationReport \
 
 ## 技术实现细节
 
-### 1. 原生SQL查询
-- 使用 `@Query(nativeQuery = true)` 支持复杂的WITH子句
-- 包含完整的countQuery用于分页计算
-- 参数化查询防止SQL注入
+### 1. EntityManager原生SQL查询
+```java
+@PersistenceContext(unitName = "doris")
+private EntityManager entityManager;
 
-### 2. 结果映射
+Query query = entityManager.createNativeQuery(MAIN_QUERY);
+query.setFirstResult(pageNumber * pageSize);
+query.setMaxResults(pageSize);
+return query.getResultList();
+```
+
+### 2. 多数据源配置
+```java
+@Bean(name = "dorisEntityManagerFactory")
+public LocalContainerEntityManagerFactoryBean dorisEntityManagerFactory(
+        EntityManagerFactoryBuilder builder,
+        @Qualifier("dorisDataSource") DataSource dataSource) {
+    return builder
+            .dataSource(dataSource)
+            .persistenceUnit("doris")
+            .build();
+}
+```
+
+### 3. 结果映射
 ```java
 private DentistCommunicationReportVM mapToViewModel(Object[] row) {
     return DentistCommunicationReportVM.builder()
@@ -140,18 +166,22 @@ private DentistCommunicationReportVM mapToViewModel(Object[] row) {
 }
 ```
 
-### 3. 分页支持
+### 4. 手动分页实现
 ```java
-Pageable pageable = PageRequest.of(param.getPageNumber(), param.getPageSize());
-Page<Object[]> resultPage = repository.findDentistCommunicationReport(..., pageable);
+// 数据查询
+List<Object[]> resultList = repository.findDentistCommunicationReport(..., pageNumber, pageSize);
+// 总数查询
+Long totalElements = repository.countDentistCommunicationReport(...);
+// 构建分页结果
+return new PageImpl<>(content, pageable, totalElements);
 ```
 
-### 4. 参数绑定
-```sql
-WHERE (:startTime IS NULL OR gd.send_out >= :startTime)
-  AND (:endTime IS NULL OR gd.send_out <= :endTime)
-  AND (:teamName IS NULL OR gms_team.name = :teamName)
-  AND (:dentistId IS NULL OR gms_dentist.id = :dentistId)
+### 5. 参数绑定
+```java
+query.setParameter("startTime", startTime);
+query.setParameter("endTime", endTime);
+query.setParameter("teamName", teamName);
+query.setParameter("dentistId", dentistId);
 ```
 
 ## 数据库表结构要求
@@ -170,10 +200,13 @@ WHERE (:startTime IS NULL OR gd.send_out >= :startTime)
 
 ## 注意事项
 
-1. **性能优化**: 复杂查询建议在数据库层面添加适当索引
-2. **参数验证**: 可在ViewModel中添加 `@Valid` 注解进行参数校验
-3. **异常处理**: 已包含基本异常处理，可根据需要扩展
-4. **日志配置**: 开发环境启用了SQL日志，生产环境建议关闭
+1. **多数据源配置**: 项目使用了主数据源和Doris数据源，确保两个数据源都配置正确
+2. **EntityManager使用**: 使用了指定unitName为"doris"的EntityManager进行查询
+3. **事务管理**: Repository使用dorisTransactionManager进行事务管理
+4. **性能优化**: 复杂查询建议在数据库层面添加适当索引
+5. **参数验证**: 可在ViewModel中添加 `@Valid` 注解进行参数校验
+6. **异常处理**: 已包含基本异常处理，可根据需要扩展
+7. **日志配置**: 开发环境启用了SQL日志，生产环境建议关闭
 
 ## 扩展功能
 
