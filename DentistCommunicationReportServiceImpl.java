@@ -26,9 +26,9 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     private EntityManager entityManager;
 
     /**
-     * 主查询SQL - 完整的医生沟通报表查询
+     * 主查询SQL - 使用LIMIT OFFSET分页
      */
-    private static final String MAIN_QUERY = """
+    private static final String MAIN_QUERY_TEMPLATE = """
             WITH ExpandedOrders AS (
               SELECT 
                 id AS order_id,
@@ -277,10 +277,11 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
               AND (:dentistId IS NULL OR gms_dentist.id = :dentistId)
             GROUP BY gms_dentist.id
             ORDER BY gms_dentist.id
+            LIMIT :limit OFFSET :offset
             """;
 
     /**
-     * 计数查询SQL - 用于分页
+     * 计数查询SQL - 不包含分页
      */
     private static final String COUNT_QUERY = """
             WITH ExpandedOrders AS (
@@ -404,21 +405,26 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 执行主查询获取数据列表
+     * 执行主查询获取数据列表 - 使用LIMIT OFFSET分页
      */
     @SuppressWarnings("unchecked")
     private List<Object[]> executeMainQuery(DentistCommunicationReportQueryVM param) {
         log.debug("执行主查询 - 页码: {}, 页大小: {}", param.getPageNumber(), param.getPageSize());
         
-        Query query = entityManager.createNativeQuery(MAIN_QUERY);
-        setQueryParameters(query, param);
-        
-        // 设置MySQL分页参数
+        // 计算LIMIT和OFFSET
+        int limit = param.getPageSize();
         int offset = param.getPageNumber() * param.getPageSize();
-        query.setFirstResult(offset);
-        query.setMaxResults(param.getPageSize());
         
-        log.debug("分页参数 - 偏移量: {}, 最大结果数: {}", offset, param.getPageSize());
+        Query query = entityManager.createNativeQuery(MAIN_QUERY_TEMPLATE);
+        
+        // 设置查询参数
+        setCommonQueryParameters(query, param);
+        
+        // 设置分页参数
+        query.setParameter("limit", limit);
+        query.setParameter("offset", offset);
+        
+        log.debug("分页参数 - LIMIT: {}, OFFSET: {}", limit, offset);
         
         List<Object[]> results = query.getResultList();
         log.debug("主查询执行完成，返回 {} 条记录", results.size());
@@ -433,7 +439,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
         log.debug("执行计数查询");
         
         Query query = entityManager.createNativeQuery(COUNT_QUERY);
-        setQueryParameters(query, param);
+        setCommonQueryParameters(query, param);
         
         Object result = query.getSingleResult();
         Long count = result != null ? ((Number) result).longValue() : 0L;
@@ -444,19 +450,19 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 设置查询参数
+     * 设置公共查询参数 - 支持null值参数
      */
-    private void setQueryParameters(Query query, DentistCommunicationReportQueryVM param) {
-        // 时间范围参数
+    private void setCommonQueryParameters(Query query, DentistCommunicationReportQueryVM param) {
+        // 时间范围参数 - 支持null
         ZonedDateTime startTime = param.getStartTime();
         ZonedDateTime endTime = param.getEndTime();
         
         query.setParameter("startTime", startTime);
         query.setParameter("endTime", endTime);
         
-        // 过滤条件参数 - 空值处理
-        String teamName = trimToNull(param.getTeamName());
-        String dentistId = trimToNull(param.getDentistId());
+        // 过滤条件参数 - 支持null和空字符串
+        String teamName = normalizeStringParam(param.getTeamName());
+        String dentistId = normalizeStringParam(param.getDentistId());
             
         query.setParameter("teamName", teamName);
         query.setParameter("dentistId", dentistId);
@@ -470,6 +476,11 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
      * 按照SQL查询结果的字段顺序进行精确映射
      */
     private DentistCommunicationReportVM mapToViewModel(Object[] row) {
+        if (row == null || row.length < 23) {
+            log.warn("查询结果行数据不完整，期望23个字段，实际: {}", row != null ? row.length : 0);
+            return createEmptyViewModel();
+        }
+        
         return DentistCommunicationReportVM.builder()
             // 基础信息字段 (0-4)
             .teamName(safeToString(row[0]))                         // team_name
@@ -510,15 +521,15 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             throw new IllegalArgumentException("查询参数不能为空");
         }
         
-        if (param.getPageNumber() < 0) {
-            throw new IllegalArgumentException("页码不能小于0");
+        if (param.getPageNumber() == null || param.getPageNumber() < 0) {
+            throw new IllegalArgumentException("页码不能为空且不能小于0");
         }
         
-        if (param.getPageSize() <= 0 || param.getPageSize() > 1000) {
-            throw new IllegalArgumentException("页大小必须在1-1000之间");
+        if (param.getPageSize() == null || param.getPageSize() <= 0 || param.getPageSize() > 1000) {
+            throw new IllegalArgumentException("页大小不能为空且必须在1-1000之间");
         }
         
-        // 时间范围验证
+        // 时间范围验证 - 允许null值
         if (param.getStartTime() != null && param.getEndTime() != null) {
             if (param.getStartTime().isAfter(param.getEndTime())) {
                 throw new IllegalArgumentException("开始时间不能大于结束时间");
@@ -526,6 +537,18 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
         }
         
         log.debug("参数验证通过");
+    }
+
+    /**
+     * 标准化字符串参数 - 处理null和空字符串
+     */
+    private String normalizeStringParam(String param) {
+        if (param == null) {
+            return null;
+        }
+        
+        String trimmed = param.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**
@@ -540,12 +563,33 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 字符串trim并转null处理
+     * 创建空的ViewModel对象
      */
-    private String trimToNull(String str) {
-        if (str == null || str.trim().isEmpty()) {
-            return null;
-        }
-        return str.trim();
+    private DentistCommunicationReportVM createEmptyViewModel() {
+        return DentistCommunicationReportVM.builder()
+            .teamName("未分组")
+            .dentistName("未知")
+            .dentistCode("000")
+            .allCasesNum("0")
+            .firstTagCasesNum("0")
+            .preDesignTagCasesNum("0")
+            .preCalledCasesNum("0")
+            .preCalledCasesRate("0")
+            .preConnectedCasesNum("0")
+            .preConnectedCasesRate("0")
+            .preTotalConnectedCallNum("0")
+            .preAverageConnectedCallNum("0")
+            .preTotalDurationSec("00:00:00")
+            .preAverageDurationSec("00:00:00")
+            .postDesignTagCasesNum("0")
+            .postCalledCasesNum("0")
+            .postCalledCasesRate("0")
+            .postConnectedCasesNum("0")
+            .postConnectedCasesRate("0")
+            .postTotalConnectedCallNum("0")
+            .postAverageConnectedCallNum("0")
+            .postTotalDurationSec("00:00:00")
+            .postAverageDurationSec("00:00:00")
+            .build();
     }
 }

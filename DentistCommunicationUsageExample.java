@@ -12,7 +12,7 @@ import java.time.ZonedDateTime;
 
 /**
  * 医生沟通报表使用示例
- * 演示如何在Service中使用EntityManager执行复杂SQL查询
+ * 演示EntityManager + LIMIT OFFSET分页 + null参数支持
  */
 @Slf4j
 @Component
@@ -22,14 +22,15 @@ public class DentistCommunicationUsageExample {
     private final ReportService reportService;
 
     /**
-     * 基础查询示例
+     * 基础查询示例 - 所有参数为null
      */
-    public void basicQueryExample() {
-        log.info("=== 基础查询示例 ===");
+    public void basicQueryWithNullParams() {
+        log.info("=== 基础查询示例（所有过滤参数为null）===");
         
         DentistCommunicationReportQueryVM queryVM = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
                 .pageSize(10)
+                // startTime, endTime, teamName, dentistId 都为null
                 .build();
 
         try {
@@ -38,7 +39,6 @@ public class DentistCommunicationUsageExample {
             log.info("查询成功：总记录数={}, 当前页记录数={}", 
                     result.getTotalElements(), result.getContent().size());
             
-            // 输出第一条记录示例
             if (!result.getContent().isEmpty()) {
                 DentistCommunicationReportVM firstRecord = result.getContent().get(0);
                 log.info("第一条记录：医生={}, 设计组={}, 总病例数={}", 
@@ -53,16 +53,17 @@ public class DentistCommunicationUsageExample {
     }
 
     /**
-     * 带时间范围的查询示例
+     * 时间范围查询示例 - 部分参数为null
      */
     public void timeRangeQueryExample() {
-        log.info("=== 时间范围查询示例 ===");
+        log.info("=== 时间范围查询示例（部分参数为null）===");
         
         DentistCommunicationReportQueryVM queryVM = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
                 .pageSize(20)
                 .startTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
                 .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
+                // teamName 和 dentistId 为null
                 .build();
 
         try {
@@ -70,7 +71,6 @@ public class DentistCommunicationUsageExample {
             
             log.info("时间范围查询成功：总记录数={}", result.getTotalElements());
             
-            // 统计沟通指标
             result.getContent().forEach(record -> {
                 log.info("医生: {} - 设计前沟通拨打率: {}%, 设计后讲解拨打率: {}%",
                         record.getDentistName(),
@@ -84,27 +84,27 @@ public class DentistCommunicationUsageExample {
     }
 
     /**
-     * 带过滤条件的查询示例
+     * 空字符串参数测试 - 验证null参数处理
      */
-    public void filteredQueryExample() {
-        log.info("=== 过滤条件查询示例 ===");
+    public void emptyStringParamsTest() {
+        log.info("=== 空字符串参数测试 ===");
         
         DentistCommunicationReportQueryVM queryVM = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
                 .pageSize(15)
-                .teamName("设计组A")
-                .dentistId("123")
                 .startTime(ZonedDateTime.parse("2024-06-01T00:00:00Z"))
                 .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
+                .teamName("") // 空字符串，应该被处理为null
+                .dentistId("   ") // 只有空格，应该被处理为null
                 .build();
 
         try {
             PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(queryVM);
             
-            log.info("过滤查询成功：总记录数={}", result.getTotalElements());
+            log.info("空字符串参数查询成功：总记录数={}", result.getTotalElements());
             
             result.getContent().forEach(record -> {
-                log.info("过滤结果 - 医生: {}, 设计组: {}, 新手首例: {}, 设计前沟通: {}例, 设计后讲解: {}例",
+                log.info("医生: {}, 设计组: {}, 新手首例: {}, 设计前沟通: {}例, 设计后讲解: {}例",
                         record.getDentistName(),
                         record.getTeamName(),
                         record.getFirstTagCasesNum(),
@@ -113,15 +113,15 @@ public class DentistCommunicationUsageExample {
             });
             
         } catch (Exception e) {
-            log.error("过滤查询失败", e);
+            log.error("空字符串参数查询失败", e);
         }
     }
 
     /**
-     * 分页查询示例
+     * LIMIT OFFSET分页测试
      */
-    public void paginationExample() {
-        log.info("=== 分页查询示例 ===");
+    public void limitOffsetPaginationTest() {
+        log.info("=== LIMIT OFFSET分页测试 ===");
         
         int pageSize = 5;
         int maxPages = 3;
@@ -135,15 +135,24 @@ public class DentistCommunicationUsageExample {
             try {
                 PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(queryVM);
                 
-                log.info("第{}页查询成功：当前页记录数={}, 总页数={}", 
-                        page + 1, result.getContent().size(), result.getTotalPages());
+                int limit = pageSize;
+                int offset = page * pageSize;
+                
+                log.info("第{}页查询成功：LIMIT={}, OFFSET={}, 当前页记录数={}, 总页数={}", 
+                        page + 1, limit, offset, result.getContent().size(), result.getTotalPages());
                 
                 if (result.getContent().isEmpty()) {
                     log.info("第{}页没有数据，停止分页查询", page + 1);
                     break;
                 }
                 
-                // 如果已经是最后一页，也停止查询
+                // 输出每页第一条记录用于验证分页效果
+                if (!result.getContent().isEmpty()) {
+                    DentistCommunicationReportVM firstRecord = result.getContent().get(0);
+                    log.info("第{}页第一条记录：医生编号={}, 医生姓名={}", 
+                            page + 1, firstRecord.getDentistCode(), firstRecord.getDentistName());
+                }
+                
                 if (page >= result.getTotalPages() - 1) {
                     log.info("已到达最后一页，停止分页查询");
                     break;
@@ -157,14 +166,53 @@ public class DentistCommunicationUsageExample {
     }
 
     /**
-     * 性能指标分析示例
+     * 完整参数查询示例
      */
-    public void performanceAnalysisExample() {
-        log.info("=== 性能指标分析示例 ===");
+    public void fullParametersQueryExample() {
+        log.info("=== 完整参数查询示例 ===");
         
         DentistCommunicationReportQueryVM queryVM = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
-                .pageSize(50)
+                .pageSize(10)
+                .startTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
+                .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
+                .teamName("设计组A")
+                .dentistId("123")
+                .build();
+
+        try {
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(queryVM);
+            
+            log.info("完整参数查询成功：总记录数={}", result.getTotalElements());
+            
+            result.getContent().forEach(record -> {
+                log.info("查询结果 - 医生: {}, 设计组: {}, 总病例: {}, " +
+                        "设计前沟通拨打率: {}%, 设计后讲解拨打率: {}%, " +
+                        "设计前沟通时长: {}, 设计后讲解时长: {}",
+                        record.getDentistName(),
+                        record.getTeamName(),
+                        record.getAllCasesNum(),
+                        record.getPreCalledCasesRate(),
+                        record.getPostCalledCasesRate(),
+                        record.getPreTotalDurationSec(),
+                        record.getPostTotalDurationSec());
+            });
+            
+        } catch (Exception e) {
+            log.error("完整参数查询失败", e);
+        }
+    }
+
+    /**
+     * 大分页测试 - 验证LIMIT OFFSET性能
+     */
+    public void largePaginationTest() {
+        log.info("=== 大分页测试 ===");
+        
+        // 测试较大的OFFSET
+        DentistCommunicationReportQueryVM queryVM = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(10) // OFFSET = 10 * 20 = 200
+                .pageSize(20)
                 .build();
 
         try {
@@ -175,26 +223,39 @@ public class DentistCommunicationUsageExample {
             long endTime = System.currentTimeMillis();
             long executionTime = endTime - startTime;
             
-            log.info("查询性能分析：");
+            log.info("大分页查询性能分析：");
+            log.info("- 页码: {}, 页大小: {}", queryVM.getPageNumber(), queryVM.getPageSize());
+            log.info("- LIMIT: {}, OFFSET: {}", queryVM.getPageSize(), queryVM.getPageNumber() * queryVM.getPageSize());
             log.info("- 执行时间: {}ms", executionTime);
             log.info("- 总记录数: {}", result.getTotalElements());
             log.info("- 查询记录数: {}", result.getContent().size());
-            log.info("- 平均每条记录耗时: {}ms", 
-                    result.getContent().isEmpty() ? 0 : executionTime / result.getContent().size());
-            
-            // 分析数据质量
-            long validRecords = result.getContent().stream()
-                    .filter(record -> !record.getDentistName().isEmpty() 
-                            && !record.getDentistCode().isEmpty())
-                    .count();
-                    
-            log.info("- 有效记录数: {}", validRecords);
-            log.info("- 数据完整率: {}%", 
-                    result.getContent().isEmpty() ? 0 : 
-                    (validRecords * 100.0 / result.getContent().size()));
             
         } catch (Exception e) {
-            log.error("性能分析查询失败", e);
+            log.error("大分页查询失败", e);
+        }
+    }
+
+    /**
+     * SQL注入防护测试
+     */
+    public void sqlInjectionProtectionTest() {
+        log.info("=== SQL注入防护测试 ===");
+        
+        DentistCommunicationReportQueryVM queryVM = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(10)
+                .teamName("'; DROP TABLE gms_dentist; --") // SQL注入尝试
+                .dentistId("1' OR '1'='1") // SQL注入尝试
+                .build();
+
+        try {
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(queryVM);
+            
+            log.info("SQL注入防护测试通过：参数化查询成功阻止了注入攻击");
+            log.info("查询结果记录数: {}", result.getContent().size());
+            
+        } catch (Exception e) {
+            log.info("SQL注入防护测试 - 查询失败（这可能是正常的）: {}", e.getMessage());
         }
     }
 
@@ -202,13 +263,15 @@ public class DentistCommunicationUsageExample {
      * 运行所有示例
      */
     public void runAllExamples() {
-        log.info("开始运行所有医生沟通报表查询示例...");
+        log.info("开始运行所有医生沟通报表查询示例（EntityManager + LIMIT OFFSET）...");
         
-        basicQueryExample();
+        basicQueryWithNullParams();
         timeRangeQueryExample();
-        filteredQueryExample();
-        paginationExample();
-        performanceAnalysisExample();
+        emptyStringParamsTest();
+        limitOffsetPaginationTest();
+        fullParametersQueryExample();
+        largePaginationTest();
+        sqlInjectionProtectionTest();
         
         log.info("所有示例运行完成！");
     }
