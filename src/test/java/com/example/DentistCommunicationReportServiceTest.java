@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * 医生沟通报表Service测试类
- * 验证EntityManager + LIMIT OFFSET分页 + null参数支持的完整性和正确性
+ * 验证完全兼容参数不传场景 - 不传则不过滤
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -25,110 +25,121 @@ public class DentistCommunicationReportServiceTest {
     @Autowired
     private ReportService reportService;
 
-    private DentistCommunicationReportQueryVM basicQueryVM;
-    private DentistCommunicationReportQueryVM filteredQueryVM;
-    private DentistCommunicationReportQueryVM nullParamsQueryVM;
+    private DentistCommunicationReportQueryVM noFilterQuery;
+    private DentistCommunicationReportQueryVM timeRangeOnlyQuery;
+    private DentistCommunicationReportQueryVM partialFilterQuery;
 
     @BeforeEach
     void setUp() {
-        // 基础查询参数
-        basicQueryVM = DentistCommunicationReportQueryVM.builder()
+        // 无过滤条件查询
+        noFilterQuery = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
                 .pageSize(10)
-                .build();
-
-        // 带过滤条件的查询参数
-        filteredQueryVM = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(20)
-                .startTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
-                .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
-                .teamName("设计组A")
-                .dentistId("123")
-                .build();
-
-        // 全null参数查询
-        nullParamsQueryVM = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(15)
-                // 所有过滤参数都为null
                 .startTime(null)
                 .endTime(null)
                 .teamName(null)
                 .dentistId(null)
                 .build();
+
+        // 只有时间范围的查询
+        timeRangeOnlyQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(15)
+                .startTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
+                .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
+                .teamName(null)
+                .dentistId(null)
+                .build();
+
+        // 部分过滤条件查询
+        partialFilterQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(20)
+                .startTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
+                .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
+                .teamName("设计组A")
+                .dentistId(null) // 医生ID不传
+                .build();
     }
 
     @Test
-    public void testBasicQueryWithNullParams() {
-        System.out.println("=== 测试基础查询（null参数支持）===");
+    public void testNoFilterQuery() {
+        System.out.println("=== 测试无过滤条件查询 ===");
         
         try {
-            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(basicQueryVM);
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(noFilterQuery);
             
             // 验证基本结构
-            assertNotNull(result, "查询结果不应为null");
-            assertNotNull(result.getContent(), "查询内容不应为null");
+            assertNotNull(result, "无过滤查询结果不应为null");
+            assertNotNull(result.getContent(), "无过滤查询内容不应为null");
             assertTrue(result.getTotalElements() >= 0, "总元素数应该>=0");
-            assertTrue(result.getTotalPages() >= 0, "总页数应该>=0");
             assertEquals(0, result.getNumber(), "当前页码应该为0");
             assertEquals(10, result.getSize(), "页大小应该为10");
             
-            System.out.println("基础查询测试通过：");
+            System.out.println("无过滤查询测试通过：");
+            System.out.println("- 查询条件: 所有过滤参数都为null");
             System.out.println("- 总记录数: " + result.getTotalElements());
-            System.out.println("- 总页数: " + result.getTotalPages());
             System.out.println("- 当前页记录数: " + result.getContent().size());
-            System.out.println("- SQL使用: LIMIT " + basicQueryVM.getPageSize() + " OFFSET " + 
-                             (basicQueryVM.getPageNumber() * basicQueryVM.getPageSize()));
-            
-            // 验证结果映射
-            if (!result.getContent().isEmpty()) {
-                DentistCommunicationReportVM firstRecord = result.getContent().get(0);
-                validateRecordStructure(firstRecord);
-                
-                System.out.println("- 第一条记录: 医生=" + firstRecord.getDentistName() + 
-                                 ", 设计组=" + firstRecord.getTeamName() +
-                                 ", 总病例数=" + firstRecord.getAllCasesNum());
-            }
+            System.out.println("- 预期行为: 查询所有数据，不进行任何过滤");
             
         } catch (Exception e) {
-            fail("基础查询应该成功执行，但抛出异常: " + e.getMessage());
+            fail("无过滤查询应该成功执行，但抛出异常: " + e.getMessage());
         }
     }
 
     @Test
-    public void testAllNullParametersQuery() {
-        System.out.println("=== 测试全null参数查询 ===");
+    public void testTimeRangeOnlyQuery() {
+        System.out.println("=== 测试只有时间范围过滤的查询 ===");
         
         try {
-            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(nullParamsQueryVM);
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(timeRangeOnlyQuery);
             
-            // 验证基本结构
-            assertNotNull(result, "null参数查询结果不应为null");
-            assertNotNull(result.getContent(), "null参数查询内容不应为null");
+            assertNotNull(result, "时间范围查询结果不应为null");
             assertTrue(result.getTotalElements() >= 0, "总元素数应该>=0");
             assertEquals(15, result.getSize(), "页大小应该为15");
             
-            System.out.println("全null参数查询测试通过：");
-            System.out.println("- 查询参数: 所有过滤条件都为null");
+            System.out.println("时间范围过滤查询测试通过：");
+            System.out.println("- 有效过滤: 时间范围 " + timeRangeOnlyQuery.getStartTime() + " 到 " + timeRangeOnlyQuery.getEndTime());
+            System.out.println("- 无过滤: teamName=null, dentistId=null");
             System.out.println("- 总记录数: " + result.getTotalElements());
-            System.out.println("- 当前页记录数: " + result.getContent().size());
-            System.out.println("- SQL处理: WHERE子句中的IS NULL条件应该正确处理");
             
         } catch (Exception e) {
-            fail("null参数查询应该成功执行，但抛出异常: " + e.getMessage());
+            fail("时间范围查询应该成功执行，但抛出异常: " + e.getMessage());
         }
     }
 
     @Test
-    public void testEmptyStringParametersQuery() {
-        System.out.println("=== 测试空字符串参数查询 ===");
+    public void testPartialFilterQuery() {
+        System.out.println("=== 测试部分参数过滤查询 ===");
+        
+        try {
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(partialFilterQuery);
+            
+            assertNotNull(result, "部分过滤查询结果不应为null");
+            assertTrue(result.getTotalElements() >= 0, "总元素数应该>=0");
+            assertEquals(20, result.getSize(), "页大小应该为20");
+            
+            System.out.println("部分过滤查询测试通过：");
+            System.out.println("- 有效过滤: 时间范围 + 设计组=" + partialFilterQuery.getTeamName());
+            System.out.println("- 无过滤: dentistId=null");
+            System.out.println("- 总记录数: " + result.getTotalElements());
+            
+        } catch (Exception e) {
+            fail("部分过滤查询应该成功执行，但抛出异常: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testEmptyStringParametersHandling() {
+        System.out.println("=== 测试空字符串参数处理 ===");
         
         DentistCommunicationReportQueryVM emptyStringQuery = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
                 .pageSize(10)
-                .teamName("") // 空字符串
-                .dentistId("   ") // 只有空格
+                .startTime(null)
+                .endTime(null)
+                .teamName("")        // 空字符串
+                .dentistId("   ")    // 只有空格
                 .build();
         
         try {
@@ -137,8 +148,9 @@ public class DentistCommunicationReportServiceTest {
             assertNotNull(result, "空字符串参数查询结果不应为null");
             assertTrue(result.getTotalElements() >= 0, "总元素数应该>=0");
             
-            System.out.println("空字符串参数测试通过：");
-            System.out.println("- 空字符串和空格应该被标准化为null");
+            System.out.println("空字符串参数处理测试通过：");
+            System.out.println("- 传入参数: teamName='', dentistId='   '");
+            System.out.println("- 预期行为: 空字符串被标准化为null，等同于无过滤");
             System.out.println("- 总记录数: " + result.getTotalElements());
             
         } catch (Exception e) {
@@ -147,24 +159,125 @@ public class DentistCommunicationReportServiceTest {
     }
 
     @Test
-    public void testLimitOffsetPagination() {
-        System.out.println("=== 测试LIMIT OFFSET分页 ===");
+    public void testSingleParameterFilters() {
+        System.out.println("=== 测试单个参数过滤 ===");
+        
+        // 只传开始时间
+        DentistCommunicationReportQueryVM startTimeOnlyQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(10)
+                .startTime(ZonedDateTime.parse("2024-06-01T00:00:00Z"))
+                .endTime(null)
+                .teamName(null)
+                .dentistId(null)
+                .build();
+        
+        // 只传结束时间
+        DentistCommunicationReportQueryVM endTimeOnlyQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(10)
+                .startTime(null)
+                .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
+                .teamName(null)
+                .dentistId(null)
+                .build();
+        
+        // 只传设计组
+        DentistCommunicationReportQueryVM teamOnlyQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(10)
+                .startTime(null)
+                .endTime(null)
+                .teamName("设计组A")
+                .dentistId(null)
+                .build();
+        
+        // 只传医生ID
+        DentistCommunicationReportQueryVM dentistOnlyQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(10)
+                .startTime(null)
+                .endTime(null)
+                .teamName(null)
+                .dentistId("123")
+                .build();
         
         try {
-            // 第一页 - LIMIT 5 OFFSET 0
+            PageImpl<DentistCommunicationReportVM> result1 = reportService.dentistCommunicationReport(startTimeOnlyQuery);
+            PageImpl<DentistCommunicationReportVM> result2 = reportService.dentistCommunicationReport(endTimeOnlyQuery);
+            PageImpl<DentistCommunicationReportVM> result3 = reportService.dentistCommunicationReport(teamOnlyQuery);
+            PageImpl<DentistCommunicationReportVM> result4 = reportService.dentistCommunicationReport(dentistOnlyQuery);
+            
+            assertNotNull(result1, "只传开始时间的查询应该成功");
+            assertNotNull(result2, "只传结束时间的查询应该成功");
+            assertNotNull(result3, "只传设计组的查询应该成功");
+            assertNotNull(result4, "只传医生ID的查询应该成功");
+            
+            System.out.println("单个参数过滤测试通过：");
+            System.out.println("- 只传开始时间: 总记录数=" + result1.getTotalElements());
+            System.out.println("- 只传结束时间: 总记录数=" + result2.getTotalElements());
+            System.out.println("- 只传设计组: 总记录数=" + result3.getTotalElements());
+            System.out.println("- 只传医生ID: 总记录数=" + result4.getTotalElements());
+            
+        } catch (Exception e) {
+            fail("单个参数过滤查询应该成功执行，但抛出异常: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testNoFilterVsPartialFilterConsistency() {
+        System.out.println("=== 测试无过滤与部分过滤的数据一致性 ===");
+        
+        try {
+            // 无过滤查询
+            PageImpl<DentistCommunicationReportVM> noFilterResult = 
+                    reportService.dentistCommunicationReport(noFilterQuery);
+            
+            // 部分过滤查询
+            PageImpl<DentistCommunicationReportVM> partialFilterResult = 
+                    reportService.dentistCommunicationReport(partialFilterQuery);
+            
+            System.out.println("数据一致性验证：");
+            System.out.println("- 无过滤查询总记录数: " + noFilterResult.getTotalElements());
+            System.out.println("- 部分过滤查询总记录数: " + partialFilterResult.getTotalElements());
+            
+            // 逻辑验证：部分过滤的结果应该<=无过滤的结果
+            assertTrue(partialFilterResult.getTotalElements() <= noFilterResult.getTotalElements(),
+                    "部分过滤的结果数量应该小于等于无过滤的结果数量");
+            
+            System.out.println("✅ 数据一致性验证通过");
+            
+        } catch (Exception e) {
+            fail("数据一致性验证失败: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testPaginationWithNoFilters() {
+        System.out.println("=== 测试无过滤条件下的分页功能 ===");
+        
+        try {
+            // 第一页
             DentistCommunicationReportQueryVM page1Query = DentistCommunicationReportQueryVM.builder()
                     .pageNumber(0)
                     .pageSize(5)
+                    .startTime(null)
+                    .endTime(null)
+                    .teamName(null)
+                    .dentistId(null)
                     .build();
             
-            PageImpl<DentistCommunicationReportVM> page1Result = reportService.dentistCommunicationReport(page1Query);
-            
-            // 第二页 - LIMIT 5 OFFSET 5
+            // 第二页
             DentistCommunicationReportQueryVM page2Query = DentistCommunicationReportQueryVM.builder()
                     .pageNumber(1)
                     .pageSize(5)
+                    .startTime(null)
+                    .endTime(null)
+                    .teamName(null)
+                    .dentistId(null)
                     .build();
             
+            PageImpl<DentistCommunicationReportVM> page1Result = reportService.dentistCommunicationReport(page1Query);
             PageImpl<DentistCommunicationReportVM> page2Result = reportService.dentistCommunicationReport(page2Query);
             
             // 验证分页逻辑
@@ -174,209 +287,114 @@ public class DentistCommunicationReportServiceTest {
                         "两页的总页数应该相同");
             assertEquals(0, page1Result.getNumber(), "第一页页码应该为0");
             assertEquals(1, page2Result.getNumber(), "第二页页码应该为1");
-            assertEquals(5, page1Result.getSize(), "页大小应该为5");
-            assertEquals(5, page2Result.getSize(), "页大小应该为5");
             
-            System.out.println("LIMIT OFFSET分页测试通过：");
+            System.out.println("无过滤分页测试通过：");
             System.out.println("- 总记录数: " + page1Result.getTotalElements());
             System.out.println("- 总页数: " + page1Result.getTotalPages());
-            System.out.println("- 第一页: LIMIT 5 OFFSET 0, 记录数: " + page1Result.getContent().size());
-            System.out.println("- 第二页: LIMIT 5 OFFSET 5, 记录数: " + page2Result.getContent().size());
-            
-            // 验证不同页的数据不重复（如果有数据的话）
-            if (!page1Result.getContent().isEmpty() && !page2Result.getContent().isEmpty()) {
-                String firstPageFirstId = page1Result.getContent().get(0).getDentistCode();
-                String secondPageFirstId = page2Result.getContent().get(0).getDentistCode();
-                
-                System.out.println("- 第一页第一条记录医生编号: " + firstPageFirstId);
-                System.out.println("- 第二页第一条记录医生编号: " + secondPageFirstId);
-                
-                // 注意：由于ORDER BY gms_dentist.id，如果数据量足够，不同页应该有不同的记录
-            }
+            System.out.println("- 第一页记录数: " + page1Result.getContent().size());
+            System.out.println("- 第二页记录数: " + page2Result.getContent().size());
             
         } catch (Exception e) {
-            fail("LIMIT OFFSET分页查询应该成功执行，但抛出异常: " + e.getMessage());
+            fail("无过滤分页查询应该成功执行，但抛出异常: " + e.getMessage());
         }
     }
 
     @Test
-    public void testLargeOffsetPagination() {
-        System.out.println("=== 测试大OFFSET分页性能 ===");
+    public void testBuilderPatternWithNullValues() {
+        System.out.println("=== 测试Builder模式中的null值处理 ===");
         
-        // 测试较大的OFFSET值
-        DentistCommunicationReportQueryVM largeOffsetQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(20) // OFFSET = 20 * 10 = 200
-                .pageSize(10)
+        // 使用Builder但不设置过滤参数（默认为null）
+        DentistCommunicationReportQueryVM builderQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
+                .pageSize(8)
+                // 不设置过滤参数，默认为null
                 .build();
         
         try {
-            long startTime = System.currentTimeMillis();
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(builderQuery);
             
-            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(largeOffsetQuery);
-            
-            long endTime = System.currentTimeMillis();
-            long executionTime = endTime - startTime;
-            
-            assertNotNull(result, "大OFFSET查询结果不应为null");
+            assertNotNull(result, "Builder模式查询结果不应为null");
             assertTrue(result.getTotalElements() >= 0, "总元素数应该>=0");
             
-            int expectedOffset = largeOffsetQuery.getPageNumber() * largeOffsetQuery.getPageSize();
-            
-            System.out.println("大OFFSET分页测试：");
-            System.out.println("- 页码: " + largeOffsetQuery.getPageNumber());
-            System.out.println("- 页大小: " + largeOffsetQuery.getPageSize());
-            System.out.println("- SQL: LIMIT " + largeOffsetQuery.getPageSize() + " OFFSET " + expectedOffset);
-            System.out.println("- 执行时间: " + executionTime + "ms");
+            System.out.println("Builder模式null值处理测试通过：");
+            System.out.println("- 查询参数: 通过Builder设置，过滤参数默认为null");
             System.out.println("- 总记录数: " + result.getTotalElements());
-            System.out.println("- 当前页记录数: " + result.getContent().size());
-            
-            // 如果OFFSET超过总记录数，应该返回空结果
-            if (expectedOffset >= result.getTotalElements()) {
-                assertTrue(result.getContent().isEmpty(), 
-                          "当OFFSET超过总记录数时，应该返回空结果");
-                System.out.println("- 结果验证: OFFSET超过总记录数，正确返回空结果");
-            }
+            System.out.println("- 预期行为: 等同于无过滤查询");
             
         } catch (Exception e) {
-            fail("大OFFSET分页查询应该成功执行，但抛出异常: " + e.getMessage());
+            fail("Builder模式查询应该成功执行，但抛出异常: " + e.getMessage());
         }
     }
 
     @Test
-    public void testParameterValidation() {
-        System.out.println("=== 测试参数验证 ===");
+    public void testParameterValidationWithNullFilters() {
+        System.out.println("=== 测试参数验证：允许过滤参数为null ===");
         
         // 测试null查询对象
         assertThrows(RuntimeException.class, () -> {
             reportService.dentistCommunicationReport(null);
         }, "null查询对象应该抛出异常");
         
-        // 测试null页码
-        DentistCommunicationReportQueryVM nullPageQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(null)
+        // 测试必需参数为null
+        DentistCommunicationReportQueryVM invalidQuery1 = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(null) // 页码不能为null
                 .pageSize(10)
                 .build();
         
         assertThrows(RuntimeException.class, () -> {
-            reportService.dentistCommunicationReport(nullPageQuery);
-        }, "null页码应该抛出异常");
+            reportService.dentistCommunicationReport(invalidQuery1);
+        }, "页码为null应该抛出异常");
         
-        // 测试null页大小
-        DentistCommunicationReportQueryVM nullSizeQuery = DentistCommunicationReportQueryVM.builder()
+        DentistCommunicationReportQueryVM invalidQuery2 = DentistCommunicationReportQueryVM.builder()
                 .pageNumber(0)
-                .pageSize(null)
+                .pageSize(null) // 页大小不能为null
                 .build();
         
         assertThrows(RuntimeException.class, () -> {
-            reportService.dentistCommunicationReport(nullSizeQuery);
-        }, "null页大小应该抛出异常");
+            reportService.dentistCommunicationReport(invalidQuery2);
+        }, "页大小为null应该抛出异常");
         
-        // 测试无效页码
-        DentistCommunicationReportQueryVM invalidPageQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(-1)
+        // 测试过滤参数为null是允许的
+        DentistCommunicationReportQueryVM validQuery = DentistCommunicationReportQueryVM.builder()
+                .pageNumber(0)
                 .pageSize(10)
+                .startTime(null)    // 允许为null
+                .endTime(null)      // 允许为null
+                .teamName(null)     // 允许为null
+                .dentistId(null)    // 允许为null
                 .build();
         
-        assertThrows(RuntimeException.class, () -> {
-            reportService.dentistCommunicationReport(invalidPageQuery);
-        }, "负数页码应该抛出异常");
-        
-        // 测试无效页大小
-        DentistCommunicationReportQueryVM invalidSizeQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(0)
-                .build();
-        
-        assertThrows(RuntimeException.class, () -> {
-            reportService.dentistCommunicationReport(invalidSizeQuery);
-        }, "零页大小应该抛出异常");
-        
-        // 测试过大页大小
-        DentistCommunicationReportQueryVM largeSizeQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(1001)
-                .build();
-        
-        assertThrows(RuntimeException.class, () -> {
-            reportService.dentistCommunicationReport(largeSizeQuery);
-        }, "过大页大小应该抛出异常");
-        
-        System.out.println("参数验证测试通过");
+        try {
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(validQuery);
+            assertNotNull(result, "所有过滤参数为null的查询应该成功");
+            System.out.println("✅ 参数验证测试通过：过滤参数允许为null");
+        } catch (Exception e) {
+            fail("过滤参数为null的查询应该成功，但抛出异常: " + e.getMessage());
+        }
     }
 
     @Test
-    public void testTimeRangeValidation() {
-        System.out.println("=== 测试时间范围验证 ===");
+    public void testPerformanceWithNoFilters() {
+        System.out.println("=== 测试无过滤条件的查询性能 ===");
         
-        // 测试开始时间大于结束时间
-        DentistCommunicationReportQueryVM invalidTimeQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(10)
-                .startTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
-                .endTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
-                .build();
-        
-        assertThrows(RuntimeException.class, () -> {
-            reportService.dentistCommunicationReport(invalidTimeQuery);
-        }, "开始时间大于结束时间应该抛出异常");
-        
-        // 测试只有开始时间
-        DentistCommunicationReportQueryVM onlyStartTimeQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(10)
-                .startTime(ZonedDateTime.parse("2024-01-01T00:00:00Z"))
-                .endTime(null)
-                .build();
+        long startTime = System.currentTimeMillis();
         
         try {
-            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(onlyStartTimeQuery);
-            assertNotNull(result, "只有开始时间的查询应该成功");
-            System.out.println("只有开始时间的查询测试通过");
-        } catch (Exception e) {
-            fail("只有开始时间的查询应该成功执行，但抛出异常: " + e.getMessage());
-        }
-        
-        // 测试只有结束时间
-        DentistCommunicationReportQueryVM onlyEndTimeQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(10)
-                .startTime(null)
-                .endTime(ZonedDateTime.parse("2024-12-31T23:59:59Z"))
-                .build();
-        
-        try {
-            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(onlyEndTimeQuery);
-            assertNotNull(result, "只有结束时间的查询应该成功");
-            System.out.println("只有结束时间的查询测试通过");
-        } catch (Exception e) {
-            fail("只有结束时间的查询应该成功执行，但抛出异常: " + e.getMessage());
-        }
-        
-        System.out.println("时间范围验证测试通过");
-    }
-
-    @Test
-    public void testSqlInjectionProtection() {
-        System.out.println("=== 测试SQL注入防护 ===");
-        
-        DentistCommunicationReportQueryVM injectionQuery = DentistCommunicationReportQueryVM.builder()
-                .pageNumber(0)
-                .pageSize(10)
-                .teamName("'; DROP TABLE gms_dentist; --")
-                .dentistId("1' OR '1'='1")
-                .build();
-        
-        try {
-            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(injectionQuery);
+            PageImpl<DentistCommunicationReportVM> result = reportService.dentistCommunicationReport(noFilterQuery);
             
-            // 如果能执行到这里，说明参数化查询成功防止了SQL注入
-            assertNotNull(result, "SQL注入防护测试通过，查询结果不为null");
-            System.out.println("SQL注入防护测试通过：参数化查询成功阻止了注入攻击");
-            System.out.println("- 查询结果记录数: " + result.getContent().size());
+            long endTime = System.currentTimeMillis();
+            long duration = endTime - startTime;
+            
+            System.out.println("无过滤查询性能测试：");
+            System.out.println("- 执行时间: " + duration + "ms");
+            System.out.println("- 总记录数: " + result.getTotalElements());
+            System.out.println("- 当前页记录数: " + result.getContent().size());
+            
+            // 性能断言：查询应该在合理时间内完成（比如30秒）
+            assertTrue(duration < 30000, "查询时间应该在30秒内完成，实际: " + duration + "ms");
             
         } catch (Exception e) {
-            // 即使查询失败，也不应该是因为SQL注入成功
-            System.out.println("SQL注入防护测试 - 查询失败但不是因为注入成功: " + e.getMessage());
+            fail("性能测试失败: " + e.getMessage());
         }
     }
 

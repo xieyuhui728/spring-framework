@@ -26,7 +26,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     private EntityManager entityManager;
 
     /**
-     * 主查询SQL - 使用位置参数解决元数据问题
+     * 主查询SQL - 完全兼容参数不传场景，支持所有参数为null的情况
      */
     private static final String MAIN_QUERY_TEMPLATE = """
             WITH ExpandedOrders AS (
@@ -63,7 +63,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                   ON gc.code = gocrd.case_code
                 LEFT JOIN gms_design gd 
                   ON gc.code = gd.case_code
-                WHERE (? IS NULL OR gd.send_out >= ?)
+                WHERE 1=1
+                  AND (? IS NULL OR gd.send_out >= ?)
                   AND (? IS NULL OR gd.send_out <= ?)
                 GROUP BY gc.code, eo.design_type
                 ) as case_first_design
@@ -273,15 +274,15 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             LEFT JOIN dentist_order_metrics dom ON gms_dentist.id = dom.dentist_id
             LEFT JOIN dentist_case_metrics dcm ON gms_dentist.id = dcm.dentist_id
             where 1 = 1
-              AND (? IS NULL OR gms_team.name = ?)
-              AND (? IS NULL OR gms_dentist.id = ?)
+              AND (? IS NULL OR ? IS NULL OR gms_team.name = ?)
+              AND (? IS NULL OR ? IS NULL OR gms_dentist.id = ?)
             GROUP BY gms_dentist.id
             ORDER BY gms_dentist.id
             LIMIT ? OFFSET ?
             """;
 
     /**
-     * 计数查询SQL - 使用位置参数
+     * 计数查询SQL - 完全兼容参数不传场景
      */
     private static final String COUNT_QUERY = """
             WITH ExpandedOrders AS (
@@ -318,7 +319,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
                   ON gc.code = gocrd.case_code
                 LEFT JOIN gms_design gd 
                   ON gc.code = gd.case_code
-                WHERE (? IS NULL OR gd.send_out >= ?)
+                WHERE 1=1
+                  AND (? IS NULL OR gd.send_out >= ?)
                   AND (? IS NULL OR gd.send_out <= ?)
                 GROUP BY gc.code, eo.design_type
                 ) as case_first_design
@@ -365,8 +367,8 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             LEFT join gms_order on gocsd.order_id = gms_order.id
             LEFT join gms_team on gms_order.team_id = gms_team.id
             where 1 = 1
-              AND (? IS NULL OR gms_team.name = ?)
-              AND (? IS NULL OR gms_dentist.id = ?)
+              AND (? IS NULL OR ? IS NULL OR gms_team.name = ?)
+              AND (? IS NULL OR ? IS NULL OR gms_dentist.id = ?)
             """;
 
     @Override
@@ -376,8 +378,14 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
         log.info("开始执行医生沟通报表查询，参数: {}", param);
         
         try {
-            // 参数验证
+            // 参数验证（允许过滤参数为null）
             validateQueryParams(param);
+            
+            // 标准化参数（将空字符串转为null）
+            param = normalizeQueryParams(param);
+            
+            // 打印实际使用的参数
+            logEffectiveParameters(param);
             
             // 执行数据查询
             List<Object[]> resultList = executeMainQuery(param);
@@ -405,7 +413,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 执行主查询获取数据列表 - 使用位置参数避免元数据问题
+     * 执行主查询获取数据列表 - 完全支持参数不传场景
      */
     @SuppressWarnings("unchecked")
     private List<Object[]> executeMainQuery(DentistCommunicationReportQueryVM param) {
@@ -417,7 +425,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
         
         Query query = entityManager.createNativeQuery(MAIN_QUERY_TEMPLATE);
         
-        // 设置位置参数 - 按照SQL中的顺序
+        // 设置位置参数 - 严格按照SQL中的顺序，支持所有参数为null
         setPositionalParameters(query, param, limit, offset);
         
         log.debug("分页参数 - LIMIT: {}, OFFSET: {}", limit, offset);
@@ -429,7 +437,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 执行计数查询获取总记录数 - 使用位置参数
+     * 执行计数查询获取总记录数 - 完全支持参数不传场景
      */
     private Long executeCountQuery(DentistCommunicationReportQueryVM param) {
         log.debug("执行计数查询");
@@ -446,63 +454,113 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 设置主查询的位置参数
+     * 设置主查询的位置参数 - 完全支持null参数，不传则不过滤
      */
     private void setPositionalParameters(Query query, DentistCommunicationReportQueryVM param, int limit, int offset) {
         ZonedDateTime startTime = param.getStartTime();
         ZonedDateTime endTime = param.getEndTime();
-        String teamName = normalizeStringParam(param.getTeamName());
-        String dentistId = normalizeStringParam(param.getDentistId());
+        String teamName = param.getTeamName();
+        String dentistId = param.getDentistId();
         
         // 按照SQL中出现的顺序设置参数
         int paramIndex = 1;
         
-        // first_designs 子查询中的参数 (4个)
-        query.setParameter(paramIndex++, startTime);    // 1: startTime check 1
-        query.setParameter(paramIndex++, startTime);    // 2: startTime value
-        query.setParameter(paramIndex++, endTime);      // 3: endTime check
-        query.setParameter(paramIndex++, endTime);      // 4: endTime value
+        // first_designs 子查询中的时间过滤参数 (4个)
+        query.setParameter(paramIndex++, startTime);    // 1: startTime null检查
+        query.setParameter(paramIndex++, startTime);    // 2: startTime 实际值
+        query.setParameter(paramIndex++, endTime);      // 3: endTime null检查
+        query.setParameter(paramIndex++, endTime);      // 4: endTime 实际值
         
-        // 主查询where子句中的参数 (4个)
-        query.setParameter(paramIndex++, teamName);     // 5: teamName check
-        query.setParameter(paramIndex++, teamName);     // 6: teamName value
-        query.setParameter(paramIndex++, dentistId);    // 7: dentistId check
-        query.setParameter(paramIndex++, dentistId);    // 8: dentistId value
+        // 主查询where子句中的过滤参数 (6个) - 双重null检查确保不传参数时不过滤
+        query.setParameter(paramIndex++, teamName);     // 5: teamName null检查1
+        query.setParameter(paramIndex++, teamName);     // 6: teamName null检查2  
+        query.setParameter(paramIndex++, teamName);     // 7: teamName 实际值
+        query.setParameter(paramIndex++, dentistId);    // 8: dentistId null检查1
+        query.setParameter(paramIndex++, dentistId);    // 9: dentistId null检查2
+        query.setParameter(paramIndex++, dentistId);    // 10: dentistId 实际值
         
         // 分页参数 (2个)
-        query.setParameter(paramIndex++, limit);        // 9: LIMIT
-        query.setParameter(paramIndex, offset);         // 10: OFFSET
+        query.setParameter(paramIndex++, limit);        // 11: LIMIT
+        query.setParameter(paramIndex, offset);         // 12: OFFSET
         
         log.debug("主查询参数设置完成 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}, limit: {}, offset: {}", 
                  startTime, endTime, teamName, dentistId, limit, offset);
     }
 
     /**
-     * 设置计数查询的位置参数
+     * 设置计数查询的位置参数 - 完全支持null参数，不传则不过滤
      */
     private void setPositionalParametersForCount(Query query, DentistCommunicationReportQueryVM param) {
         ZonedDateTime startTime = param.getStartTime();
         ZonedDateTime endTime = param.getEndTime();
-        String teamName = normalizeStringParam(param.getTeamName());
-        String dentistId = normalizeStringParam(param.getDentistId());
+        String teamName = param.getTeamName();
+        String dentistId = param.getDentistId();
         
         // 按照SQL中出现的顺序设置参数
         int paramIndex = 1;
         
-        // first_designs 子查询中的参数 (4个)
-        query.setParameter(paramIndex++, startTime);    // 1: startTime check 1
-        query.setParameter(paramIndex++, startTime);    // 2: startTime value
-        query.setParameter(paramIndex++, endTime);      // 3: endTime check
-        query.setParameter(paramIndex++, endTime);      // 4: endTime value
+        // first_designs 子查询中的时间过滤参数 (4个)
+        query.setParameter(paramIndex++, startTime);    // 1: startTime null检查
+        query.setParameter(paramIndex++, startTime);    // 2: startTime 实际值
+        query.setParameter(paramIndex++, endTime);      // 3: endTime null检查
+        query.setParameter(paramIndex++, endTime);      // 4: endTime 实际值
         
-        // 主查询where子句中的参数 (4个)
-        query.setParameter(paramIndex++, teamName);     // 5: teamName check
-        query.setParameter(paramIndex++, teamName);     // 6: teamName value
-        query.setParameter(paramIndex++, dentistId);    // 7: dentistId check
-        query.setParameter(paramIndex, dentistId);      // 8: dentistId value
+        // 主查询where子句中的过滤参数 (6个)
+        query.setParameter(paramIndex++, teamName);     // 5: teamName null检查1
+        query.setParameter(paramIndex++, teamName);     // 6: teamName null检查2
+        query.setParameter(paramIndex++, teamName);     // 7: teamName 实际值
+        query.setParameter(paramIndex++, dentistId);    // 8: dentistId null检查1
+        query.setParameter(paramIndex++, dentistId);    // 9: dentistId null检查2
+        query.setParameter(paramIndex, dentistId);      // 10: dentistId 实际值
         
         log.debug("计数查询参数设置完成 - startTime: {}, endTime: {}, teamName: {}, dentistId: {}", 
                  startTime, endTime, teamName, dentistId);
+    }
+
+    /**
+     * 标准化查询参数 - 将空字符串转换为null，确保不传参数时不过滤
+     */
+    private DentistCommunicationReportQueryVM normalizeQueryParams(DentistCommunicationReportQueryVM param) {
+        return DentistCommunicationReportQueryVM.builder()
+                .pageNumber(param.getPageNumber())
+                .pageSize(param.getPageSize())
+                .startTime(param.getStartTime()) // 时间参数保持原样，支持null
+                .endTime(param.getEndTime())     // 时间参数保持原样，支持null
+                .teamName(normalizeStringParam(param.getTeamName()))   // 空字符串转null
+                .dentistId(normalizeStringParam(param.getDentistId())) // 空字符串转null
+                .build();
+    }
+
+    /**
+     * 打印有效的查询参数，帮助调试
+     */
+    private void logEffectiveParameters(DentistCommunicationReportQueryVM param) {
+        log.info("有效查询参数:");
+        log.info("  - 分页: 第{}页，每页{}条", param.getPageNumber() + 1, param.getPageSize());
+        
+        if (param.getStartTime() != null) {
+            log.info("  - 开始时间过滤: {}", param.getStartTime());
+        } else {
+            log.info("  - 开始时间过滤: 未设置（不过滤）");
+        }
+        
+        if (param.getEndTime() != null) {
+            log.info("  - 结束时间过滤: {}", param.getEndTime());
+        } else {
+            log.info("  - 结束时间过滤: 未设置（不过滤）");
+        }
+        
+        if (param.getTeamName() != null) {
+            log.info("  - 设计组过滤: {}", param.getTeamName());
+        } else {
+            log.info("  - 设计组过滤: 未设置（不过滤）");
+        }
+        
+        if (param.getDentistId() != null) {
+            log.info("  - 医生ID过滤: {}", param.getDentistId());
+        } else {
+            log.info("  - 医生ID过滤: 未设置（不过滤）");
+        }
     }
 
     /**
@@ -548,13 +606,14 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
     }
 
     /**
-     * 参数验证
+     * 参数验证 - 只验证必需的分页参数，过滤参数允许为null
      */
     private void validateQueryParams(DentistCommunicationReportQueryVM param) {
         if (param == null) {
             throw new IllegalArgumentException("查询参数不能为空");
         }
         
+        // 分页参数必须有效
         if (param.getPageNumber() == null || param.getPageNumber() < 0) {
             throw new IllegalArgumentException("页码不能为空且不能小于0");
         }
@@ -563,18 +622,19 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
             throw new IllegalArgumentException("页大小不能为空且必须在1-1000之间");
         }
         
-        // 时间范围验证 - 允许null值
+        // 时间范围验证 - 允许单独为null，但如果都有值则需要验证逻辑关系
         if (param.getStartTime() != null && param.getEndTime() != null) {
             if (param.getStartTime().isAfter(param.getEndTime())) {
                 throw new IllegalArgumentException("开始时间不能大于结束时间");
             }
         }
         
-        log.debug("参数验证通过");
+        // 过滤参数完全允许为null - 不传则不过滤
+        log.debug("参数验证通过 - 支持所有过滤参数为null的场景");
     }
 
     /**
-     * 标准化字符串参数 - 处理null和空字符串
+     * 标准化字符串参数 - 将空字符串、纯空格转为null，确保不过滤
      */
     private String normalizeStringParam(String param) {
         if (param == null) {
@@ -582,6 +642,7 @@ public class DentistCommunicationReportServiceImpl implements ReportService {
         }
         
         String trimmed = param.trim();
+        // 空字符串转为null，确保SQL中的IS NULL判断生效
         return trimmed.isEmpty() ? null : trimmed;
     }
 
